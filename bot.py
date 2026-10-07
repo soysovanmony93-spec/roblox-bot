@@ -5,7 +5,7 @@ from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# បង្កើត Web Server តូចមួយសម្រាប់ Render Web Service
+# Web Server សម្រាប់ Render Web Service
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -18,6 +18,9 @@ def run_web():
 
 TOKEN = os.getenv("BOT_TOKEN")
 
+# Telegram Admin ID
+ADMIN_ID = 873482655
+
 def init_db():
     conn = sqlite3.connect("shop.db")
     c = conn.cursor()
@@ -25,32 +28,55 @@ def init_db():
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT,
-            price REAL,
             credentials TEXT,
             status TEXT DEFAULT 'available'
         )
     ''')
-    c.execute("SELECT COUNT(*) FROM accounts")
-    if c.fetchone()[0] == 0:
-        c.execute("INSERT INTO accounts (title, price, credentials) VALUES (?, ?, ?)",
-                  ("Roblox VC (New)", 1.50, "User: RobloxUser01 | Pass: Pass12345"))
-        c.execute("INSERT INTO accounts (title, price, credentials) VALUES (?, ?, ?)",
-                  ("Roblox VC (New)", 1.50, "User: RobloxUser02 | Pass: Pass67890"))
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
+    # តម្លៃលំនាំដើម និងព័ត៌មាន Detail
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('price', '1.50')")
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('detail', 'គណនីថ្មី (13+) មាន Voice Chat ស្រាប់')")
+    
+    # លុប Account Demo ចាស់ៗចោលស្វ័យប្រវត្តិ
+    c.execute("DELETE FROM accounts WHERE credentials LIKE '%RobloxUser%'")
     conn.commit()
     conn.close()
 
 init_db()
 
+def get_setting(key, default=""):
+    conn = sqlite3.connect("shop.db")
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else default
+
+def set_setting(key, value):
+    conn = sqlite3.connect("shop.db")
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    price = get_setting("price", "1.50")
+    detail = get_setting("detail", "គណនីថ្មី (13+) មាន Voice Chat ស្រាប់")
+
     keyboard = [
-        [InlineKeyboardButton("🛒 ទិញ Account Roblox VC ($1.50)", callback_data="buy_vc")],
+        [InlineKeyboardButton(f"🛒 ទិញ Account Roblox VC (${price})", callback_data="buy_vc")],
         [InlineKeyboardButton("📦 ពិនិត្យចំនួនស្តុក", callback_data="check_stock")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = (
         "👋 **សួស្តី! សូមស្វាគមន៍មកកាន់ហាង Roblox VC**\n\n"
-        "✨ គណនីថ្មី (13+) មាន Voice Chat ស្រាប់\n"
-        "💵 តម្លៃ៖ $1.50 / 1 Account\n\n"
+        f"✨ {detail}\n"
+        f"💵 តម្លៃ៖ ${price} / 1 Account\n\n"
         "សូមជ្រើសរើសជម្រើសខាងក្រោម៖"
     )
     if update.message:
@@ -104,11 +130,68 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "back_home":
         await start(update, context)
 
+# --- មុខងារ ADMIN សម្រាប់អ្នកគ្រប់គ្រង ---
+async def add_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    creds = " ".join(context.args)
+    if not creds:
+        await update.message.reply_text("⚠️ របៀបប្រើ៖ `/add User:xxx | Pass:xxx`", parse_mode="Markdown")
+        return
+
+    conn = sqlite3.connect("shop.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO accounts (title, credentials) VALUES (?, ?)", ("Roblox VC", creds))
+    conn.commit()
+    conn.close()
+
+    await update.message.reply_text(f"✅ បានបញ្ចូល Account ចូលស្តុកជោគជ័យ:\n`{creds}`", parse_mode="Markdown")
+
+async def clear_stock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    conn = sqlite3.connect("shop.db")
+    c = conn.cursor()
+    c.execute("DELETE FROM accounts")
+    conn.commit()
+    conn.close()
+
+    await update.message.reply_text("🗑️ បានលុប Stock ទាំងអស់ចោលស្អាតហើយ! (ស្តុកបច្ចុប្បន្ន = 0)")
+
+async def set_price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ របៀបប្រើ៖ `/setprice 2.00`", parse_mode="Markdown")
+        return
+
+    new_price = context.args[0]
+    set_setting("price", new_price)
+    await update.message.reply_text(f"✅ តម្លៃត្រូវបានប្តូរទៅជា៖ **${new_price}**", parse_mode="Markdown")
+
+async def set_detail_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    new_detail = " ".join(context.args)
+    if not new_detail:
+        await update.message.reply_text("⚠️ របៀបប្រើ៖ `/setdetail ព័ត៌មានលម្អិតថ្មី...`", parse_mode="Markdown")
+        return
+
+    set_setting("detail", new_detail)
+    await update.message.reply_text(f"✅ Detail ត្រូវបានកែប្រែទៅជា៖\n{new_detail}")
+
 if __name__ == '__main__':
-    # បើកដំណើរការ Web Server លើ thread ផ្សេង
     threading.Thread(target=run_web, daemon=True).start()
     
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add", add_account))
+    app.add_handler(CommandHandler("clearstock", clear_stock_cmd))
+    app.add_handler(CommandHandler("setprice", set_price_cmd))
+    app.add_handler(CommandHandler("setdetail", set_detail_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.run_polling()
