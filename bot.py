@@ -3,7 +3,7 @@ import sqlite3
 import threading
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ==========================================
 # ១. Web Server សម្រាប់ Render Web Service
@@ -24,7 +24,6 @@ def run_web():
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 873482655
 
-# ព័ត៌មាន Admin និង Channel របស់អ្នក
 ADMIN_USERNAME = "sovanmony_55"
 CHANNEL_LINK = "https://t.me/MN_SELLER90"
 
@@ -49,14 +48,11 @@ def init_db():
         )
     ''')
     
-    # តម្លៃ និង Detail លំនាំដើម
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('price', '1.50')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('detail', 'គណនីថ្មី (13+) មាន Voice Chat ស្រាប់ • Clean 100% មិនទាន់ភ្ជាប់ Email/Phone')")
-    # រូបភាព Banner Gaming ស្អាត
     default_banner = "https://images.unsplash.com/photo-1612287232230-07e3240fbfdb?w=900&auto=format&fit=crop&q=80"
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('banner', ?)", (default_banner,))
     
-    # លុប Account Demo ចាស់ៗចោល
     c.execute("DELETE FROM accounts WHERE credentials LIKE '%RobloxUser%'")
     conn.commit()
     conn.close()
@@ -100,7 +96,7 @@ def get_main_keyboard(price):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     price = get_setting("price", "1.50")
     detail = get_setting("detail")
-    banner_url = get_setting("banner")
+    banner = get_setting("banner")
 
     caption_text = (
         "👋 **សួស្តី! សូមស្វាគមន៍មកកាន់ហាង ROBLOX VC STORE**\n\n"
@@ -114,7 +110,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message:
         try:
-            await update.message.reply_photo(photo=banner_url, caption=caption_text, reply_markup=reply_markup, parse_mode="Markdown")
+            await update.message.reply_photo(photo=banner, caption=caption_text, reply_markup=reply_markup, parse_mode="Markdown")
         except Exception:
             await update.message.reply_text(caption_text, reply_markup=reply_markup, parse_mode="Markdown")
     else:
@@ -123,7 +119,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         try:
-            await update.callback_query.message.reply_photo(photo=banner_url, caption=caption_text, reply_markup=reply_markup, parse_mode="Markdown")
+            await update.callback_query.message.reply_photo(photo=banner, caption=caption_text, reply_markup=reply_markup, parse_mode="Markdown")
         except Exception:
             await update.callback_query.message.reply_text(caption_text, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -203,15 +199,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ មិនមានសិទ្ធិប្រើប្រាស់ Command នេះឡើយ!")
+        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
         return
 
     admin_text = (
         "🛠 **ផ្ទាំងគ្រប់គ្រង ADMIN (Admin Panel)**\n\n"
-        "• `/add User:xxx | Pass:xxx` ➡️ បញ្ចូលគណនីថ្មីចូលស្តុក\n"
+        "• `/add User:xxx | Pass:xxx` ➡️ បញ្ចូលគណនីថ្មី\n"
         "• `/setprice 2.00` ➡️ កែប្រែតម្លៃ\n"
         "• `/setdetail អត្ថបទ...` ➡️ កែប្រែព័ត៌មាន Detail\n"
-        "• `/setbanner Link_រូបភាព` ➡️ ប្តូររូបភាព Banner លើសារ /start\n"
+        "• **ប្តូរ Banner:** Reply លើរូប រួចវាយ `/setbanner`\n"
         "• `/stocklist` ➡️ ឆែករបាយការណ៍ស្តុក\n"
         "• `/clearstock` ➡️ លុបស្តុកចោលទាំងអស់"
     )
@@ -222,13 +218,26 @@ async def set_banner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
         return
 
-    if not context.args:
-        await update.message.reply_text("⚠️ របៀបប្រើ៖ `/setbanner https://example.com/banner.jpg`", parse_mode="Markdown")
+    file_id = None
+    # ករណី Reply លើរូប
+    if update.message.reply_to_message and update.message.reply_to_message.photo:
+        file_id = update.message.reply_to_message.photo[-1].file_id
+    # ករណីផ្ញើរូបផ្ទាល់ជាមួយ Caption /setbanner
+    elif update.message.photo:
+        file_id = update.message.photo[-1].file_id
+
+    if file_id:
+        set_setting("banner", file_id)
+        await update.message.reply_text("✅ បានកំណត់រូបភាព Banner ជោគជ័យ!")
         return
 
-    new_banner = context.args[0]
-    set_setting("banner", new_banner)
-    await update.message.reply_text("✅ បានប្តូររូប Banner ថ្មីជោគជ័យ!")
+    # ករណីដាក់ Link URL តាមក្រោយ /setbanner <url>
+    if context.args:
+        set_setting("banner", context.args[0])
+        await update.message.reply_text("✅ បានកំណត់ Link រូបភាពធ្វើជា Banner ជោគជ័យ!")
+        return
+
+    await update.message.reply_text("💡 **របៀបប្តូរ Banner:**\nសូម **Reply** លើរូប Logo MN STORE រួចវាយពាក្យ `/setbanner` ផ្ញើមកវិញ!", parse_mode="Markdown")
 
 async def add_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -316,13 +325,12 @@ if __name__ == '__main__':
     
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # User handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     
-    # Admin handlers
     app.add_handler(CommandHandler("admin", admin_panel))
     app.add_handler(CommandHandler("setbanner", set_banner_cmd))
+    app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r"^/setbanner"), set_banner_cmd))
     app.add_handler(CommandHandler("add", add_account))
     app.add_handler(CommandHandler("stocklist", stock_list))
     app.add_handler(CommandHandler("clearstock", clear_stock_cmd))
