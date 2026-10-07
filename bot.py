@@ -21,12 +21,13 @@ def run_web():
     web_app.run(host="0.0.0.0", port=port)
 
 # ==========================================
-# ២. ការកំណត់ Token និង Admin
+# ២. ការកំណត់ Token, Admin និង Channel
 # ==========================================
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 873482655
 
 ADMIN_USERNAME = "sovanmony_55"
+CHANNEL_USERNAME = "@MN_SELLER90"  # Username របស់ Channel
 CHANNEL_LINK = "https://t.me/MN_SELLER90"
 
 # ==========================================
@@ -49,7 +50,6 @@ def init_db():
             value TEXT
         )
     ''')
-    # តារាងកត់ត្រាការបញ្ជាទិញ (Orders)
     c.execute('''
         CREATE TABLE IF NOT EXISTS orders (
             order_code TEXT PRIMARY KEY,
@@ -62,11 +62,8 @@ def init_db():
     
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('price', '1.50')")
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('detail', 'គណនីថ្មី (13+) មាន Voice Chat ស្រាប់ • Clean 100% មិនទាន់ភ្ជាប់ Email/Phone')")
-    
     default_banner = "https://images.unsplash.com/photo-1612287232230-07e3240fbfdb?w=900&auto=format&fit=crop&q=80"
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('banner', ?)", (default_banner,))
-    
-    # QR Code លំនាំដើម
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('qr_code', '')")
     
     conn.commit()
@@ -93,8 +90,27 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 # ==========================================
-# ៤. មុខងារសម្រាប់ USER
+# ៤. មុខងារត្រួតពិនិត្យការ Join Channel (Force Sub)
 # ==========================================
+async def check_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if is_admin(user_id):
+        return True
+    try:
+        member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+        return False
+    except Exception as e:
+        print(f"Error checking membership: {e}")
+        # ប្រសិនបើមានបញ្ហាពិនិត្យសិទ្ធិ អនុញ្ញាតឱ្យដំណើរការធម្មតាដើម្បីកុំឱ្យគាំង Bot
+        return True
+
+def get_force_sub_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 ចូលរួម Channel ជាមុន", url=CHANNEL_LINK)],
+        [InlineKeyboardButton("✅ ខ្ញុំបាន Join រួចហើយ", callback_data="check_joined")]
+    ])
+
 def get_main_keyboard(price):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"🛒 ទិញ Account Roblox VC (${price})", callback_data="buy_vc")],
@@ -108,7 +124,25 @@ def get_main_keyboard(price):
         ]
     ])
 
+# ==========================================
+# ៥. មុខងារសម្រាប់ USER
+# ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    # ពិនិត្យមើលថាតើភ្ញៀវបាន Join Channel ហើយឬនៅ
+    is_joined = await check_membership(user_id, context)
+    if not is_joined:
+        join_msg = (
+            "⚠️ **សូមចូលរួម Channel របស់ហាងជាមុនសិន!**\n\n"
+            f"ដើម្បីទទួលបានការបញ្ចុះតម្លៃ និងប្រើប្រាស់ Bot ស្វ័យប្រវត្តិនេះបាន សូមចុចចូលរួម Channel {CHANNEL_USERNAME} ជាមុនសិន រួចចុចប៊ូតុងបញ្ជាក់ខាងក្រោម។"
+        )
+        if update.message:
+            await update.message.reply_text(join_msg, reply_markup=get_force_sub_keyboard(), parse_mode="Markdown")
+        else:
+            await update.callback_query.edit_message_text(join_msg, reply_markup=get_force_sub_keyboard(), parse_mode="Markdown")
+        return
+
     price = get_setting("price", "1.50")
     detail = get_setting("detail")
     banner = get_setting("banner")
@@ -144,7 +178,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     back_kb = [[InlineKeyboardButton("🔙 ត្រឡប់ទៅម៉ឺនុយដើម", callback_data="back_home")]]
 
-    if query.data == "check_stock":
+    if query.data == "check_joined":
+        is_joined = await check_membership(query.from_user.id, context)
+        if is_joined:
+            await query.answer("✅ អរគុណសម្រាប់ការចូលរួម Channel!", show_alert=True)
+            await start(update, context)
+        else:
+            await query.answer("❌ អ្នកមិនទាន់បានចូលរួម Channel នៅឡើយទេ! សូមចុច Join សិន។", show_alert=True)
+
+    elif query.data == "check_stock":
         conn = sqlite3.connect("shop.db")
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM accounts WHERE status = 'available'")
@@ -177,6 +219,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text=faq_text, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
 
     elif query.data == "buy_vc":
+        # ពិនិត្យ Force Sub មុនពេលទិញ
+        is_joined = await check_membership(query.from_user.id, context)
+        if not is_joined:
+            await query.answer("⚠️ សូមចូលរួម Channel ជាមុនសិន!", show_alert=True)
+            await start(update, context)
+            return
+
         conn = sqlite3.connect("shop.db")
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM accounts WHERE status = 'available'")
@@ -191,7 +240,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(text=err_msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
             return
 
-        # បង្កើតលេខកូដ Order Code ការពារការបន្លំ Receipt ចាស់
         order_code = f"MN-{random.randint(1000, 9999)}"
         c.execute("INSERT INTO orders (order_code, user_id, user_name, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
                   (order_code, query.from_user.id, query.from_user.full_name, time.time()))
@@ -229,7 +277,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_code = query.data.split("_")[1]
         conn = sqlite3.connect("shop.db")
         c = conn.cursor()
-        c.execute("SELECT user_id, status FROM orders WHERE order_code = ?", (order_code,))
+        c.execute("SELECT user_id, status, user_name FROM orders WHERE order_code = ?", (order_code,))
         order = c.fetchone()
 
         if not order or order[1] != 'pending':
@@ -237,9 +285,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_caption(caption=f"⚠️ ការបញ្ជាទិញ `{order_code}` ត្រូវបានដោះស្រាយរួចរាល់ហើយ!", parse_mode="Markdown")
             return
 
-        buyer_id = order[0]
+        buyer_id, _, buyer_name = order
 
-        # ចាប់យក Account ដែលទំនេរ
         c.execute("SELECT id, credentials FROM accounts WHERE status = 'available' LIMIT 1")
         acc = c.fetchone()
 
@@ -259,15 +306,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎉 **ការទូទាត់ប្រាក់ទទួលបានជោគជ័យ!**\n\n"
             f"🔑 **ព័ត៌មានគណនី Roblox របស់អ្នក:**\n`{creds}`\n\n"
             "⚠️ _សូមប្រញាប់ចូលប្តូរពាក្យសម្ងាត់ និងភ្ជាប់ Email ការពារភ្លាមៗ!_\n"
-            "អរគុណច្រើនសម្រាប់ការគាំទ្រហាង MN STORE! ❤️"
+            f"អរគុណច្រើនសម្រាប់ការគាំទ្រហាង {CHANNEL_USERNAME}! ❤️"
         )
         try:
             await context.bot.send_message(chat_id=buyer_id, text=buyer_msg, parse_mode="Markdown")
         except Exception as e:
             print(f"Error sending to buyer: {e}")
 
+        # ✅ បង្ហោះ Auto Vouch / Feedback ចូល Channel ស្វ័យប្រវត្ត
+        price = get_setting("price", "1.50")
+        channel_vouch_msg = (
+            "🎉 **ការបញ្ជាទិញជោគជ័យ (SUCCESSFUL ORDER)**\n\n"
+            f"🛒 **ទំនិញ៖** Account Roblox Voice Chat (13+)\n"
+            f"💵 **តម្លៃ៖** `${price}`\n"
+            f"🏷 **លេខកូដវិក្កយបត្រ៖** `{order_code}`\n"
+            f"👤 **អតិថិជន៖** {buyer_name}\n"
+            "⚡ **ស្ថានភាព៖** បញ្ជូនគណនីជោគជ័យ ១០០%\n\n"
+            "🙏 _សូមអរគុណសម្រាប់ការគាំទ្រហាង MN STORE!_\n"
+            f"🤖 ចង់ទិញ Account ស្វ័យប្រវត្តិ៖ @{context.bot.username}"
+        )
+        try:
+            await context.bot.send_message(chat_id=CHANNEL_USERNAME, text=channel_vouch_msg, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error posting to channel: {e}")
+
         await query.edit_message_caption(
-            caption=f"✅ បាន **APPROVE** ការបញ្ជាទិញ `{order_code}` ជោគជ័យ!\nAccount ត្រូវបានផ្ញើជូនភ្ញៀវរួចរាល់។",
+            caption=f"✅ បាន **APPROVE** ការបញ្ជាទិញ `{order_code}` ជោគជ័យ!\n• Account ត្រូវបានផ្ញើជូនភ្ញៀវរួចរាល់\n• បានបង្ហោះ Feedback ចូល Channel រួចរាល់។",
             parse_mode="Markdown"
         )
 
@@ -306,17 +370,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
 
 # ==========================================
-# ៥. ទទួលវិក្កយបត្រពីភ្ញៀវ
+# ៦. ទទួលវិក្កយបត្រពីភ្ញៀវ
 # ==========================================
 async def handle_buyer_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # បើ Admin ផ្ញើរូប មិនមែនជាការបង់ប្រាក់ទេ
     if is_admin(update.effective_user.id):
         return
 
     user_id = update.effective_user.id
     conn = sqlite3.connect("shop.db")
     c = conn.cursor()
-    # ស្វែងរកការបញ្ជាទិញដែលនៅ pending ក្នុងរយៈពេល ១០ នាទី
     ten_mins_ago = time.time() - 600
     c.execute("SELECT order_code FROM orders WHERE user_id = ? AND status = 'pending' AND created_at >= ? ORDER BY created_at DESC LIMIT 1", (user_id, ten_mins_ago))
     row = c.fetchone()
@@ -329,10 +391,8 @@ async def handle_buyer_receipt(update: Update, context: ContextTypes.DEFAULT_TYP
     order_code = row[0]
     receipt_photo = update.message.photo[-1].file_id
 
-    # ផ្ញើដំណឹងប្រាប់ភ្ញៀវ
     await update.message.reply_text("⏳ ទទួលបានវិក្កយបត្រហើយ! ប្រព័ន្ធកំពុងជូនដំណឹងទៅ Admin ដើម្បីត្រួតពិនិត្យ និងបញ្ចេញគណនីជូនអ្នកក្នុងរយៈពេលខ្លី...")
 
-    # បញ្ជូនវិក្កយបត្រទៅកាន់ Admin
     admin_kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Approve", callback_data=f"approve_{order_code}"),
@@ -357,7 +417,7 @@ async def handle_buyer_receipt(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 # ==========================================
-# ៦. មុខងារ ADMIN
+# ៧. មុខងារ ADMIN
 # ==========================================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -392,7 +452,7 @@ async def set_qr_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ បានកំណត់រូបភាព QR Code បង់ប្រាក់ជោគជ័យ!")
         return
 
-    await update.message.reply_text("💡 **របៀបដាក់ QR Code:**\nសូម **Reply** លើរូបភាព QR Code ABA/Bakong របស់អ្នក រួចវាយពាក្យ `/setqr` ផ្ញើមកវិញ!", parse_mode="Markdown")
+    await update.message.reply_text("💡 **របៀបដាក់ QR Code:**\nសូម **Reply** លើរូបភាព QR Code ABA/Bakong រួចវាយពាក្យ `/setqr` ផ្ញើមកវិញ!", parse_mode="Markdown")
 
 async def set_banner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -491,7 +551,7 @@ async def set_detail_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Detail ត្រូវបានកែប្រែទៅជា៖\n{new_detail}")
 
 # ==========================================
-# ៧. ចាប់ផ្ដើមដំណើរការ Bot
+# ៨. ចាប់ផ្ដើមដំណើរការ Bot
 # ==========================================
 if __name__ == '__main__':
     threading.Thread(target=run_web, daemon=True).start()
