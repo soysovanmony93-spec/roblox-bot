@@ -1,7 +1,20 @@
 import os
 import sqlite3
+import threading
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+
+# បង្កើត Web Server តូចមួយសម្រាប់ Render Web Service
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def home():
+    return "Bot is running 24/7!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port)
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -19,7 +32,6 @@ def init_db():
     ''')
     c.execute("SELECT COUNT(*) FROM accounts")
     if c.fetchone()[0] == 0:
-        # គណនីគំរូសាកល្បង
         c.execute("INSERT INTO accounts (title, price, credentials) VALUES (?, ?, ?)",
                   ("Roblox VC (New)", 1.50, "User: RobloxUser01 | Pass: Pass12345"))
         c.execute("INSERT INTO accounts (title, price, credentials) VALUES (?, ?, ?)",
@@ -93,6 +105,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
 
 if __name__ == '__main__':
+    # បើកដំណើរការ Web Server លើ thread ផ្សេង
+    threading.Thread(target=run_web, daemon=True).start()
+    
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
