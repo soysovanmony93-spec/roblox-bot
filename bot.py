@@ -6,13 +6,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # ==========================================
-# ១. បង្កើត Web Server សម្រាប់ Render Web Service
+# ១. Web Server សម្រាប់ Render Web Service
 # ==========================================
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    # ទំព័រនេះសម្រាប់ឱ្យ Render ដឹងថា Server នៅរស់រានមានជីវិត ២៤/៧
     return "Roblox Shop Bot is running 24/7!"
 
 def run_web():
@@ -20,12 +19,14 @@ def run_web():
     web_app.run(host="0.0.0.0", port=port)
 
 # ==========================================
-# ២. កំណត់ Token និង Admin ID
+# ២. កំណត់ Token, Admin ID, Admin Username និង Channel
 # ==========================================
 TOKEN = os.getenv("BOT_TOKEN")
-
-# Telegram User ID របស់អ្នក (មានសិទ្ធិតែ 1 គត់ជា Admin)
 ADMIN_ID = 873482655
+
+# ព័ត៌មាន Admin និង Channel របស់អ្នក
+ADMIN_USERNAME = "sovanmony_55"
+CHANNEL_LINK = "https://t.me/MN_SELLER90"
 
 # ==========================================
 # ៣. ប្រព័ន្ធ Database (SQLite)
@@ -33,8 +34,6 @@ ADMIN_ID = 873482655
 def init_db():
     conn = sqlite3.connect("shop.db")
     c = conn.cursor()
-    
-    # តារាងផ្ទុកគណនី Roblox
     c.execute('''
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,8 +42,6 @@ def init_db():
             status TEXT DEFAULT 'available'
         )
     ''')
-    
-    # តារាងផ្ទុកតម្លៃ និងព័ត៌មាន Detail
     c.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -52,11 +49,14 @@ def init_db():
         )
     ''')
     
-    # តម្លៃដើម និង Detail ដើម
+    # តម្លៃ និង Detail លំនាំដើម
     c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('price', '1.50')")
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('detail', 'គណនីថ្មី (13+) មាន Voice Chat ស្រាប់')")
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('detail', 'គណនីថ្មី (13+) មាន Voice Chat ស្រាប់ • Clean 100% មិនទាន់ភ្ជាប់ Email/Phone')")
+    # រូបភាព Banner Gaming ស្អាត
+    default_banner = "https://images.unsplash.com/photo-1612287232230-07e3240fbfdb?w=900&auto=format&fit=crop&q=80"
+    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('banner', ?)", (default_banner,))
     
-    # លុប Account Demo ចោលដោយស្វ័យប្រវត្តិ
+    # លុប Account Demo ចាស់ៗចោល
     c.execute("DELETE FROM accounts WHERE credentials LIKE '%RobloxUser%'")
     conn.commit()
     conn.close()
@@ -78,41 +78,61 @@ def set_setting(key, value):
     conn.commit()
     conn.close()
 
-# មុខងារជំនួយ៖ ពិនិត្យមើលថាតើអ្នកផ្ញើសារជា Admin ឬអត់
 def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 # ==========================================
-# ៤. មុខងារសម្រាប់ USER ទូទៅ
+# ៤. មុខងារសម្រាប់ USER
 # ==========================================
+def get_main_keyboard(price):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🛒 ទិញ Account Roblox VC (${price})", callback_data="buy_vc")],
+        [
+            InlineKeyboardButton("📦 ពិនិត្យស្តុក", callback_data="check_stock"),
+            InlineKeyboardButton("ℹ️ ការណែនាំ / FAQ", callback_data="faq")
+        ],
+        [
+            InlineKeyboardButton("💬 ទាក់ទង Admin", url=f"https://t.me/{ADMIN_USERNAME}"),
+            InlineKeyboardButton("📢 ចូល Channel", url=CHANNEL_LINK)
+        ]
+    ])
 
-# បញ្ជា /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     price = get_setting("price", "1.50")
-    detail = get_setting("detail", "គណនីថ្មី (13+) មាន Voice Chat ស្រាប់")
+    detail = get_setting("detail")
+    banner_url = get_setting("banner")
 
-    keyboard = [
-        [InlineKeyboardButton(f"🛒 ទិញ Account Roblox VC (${price})", callback_data="buy_vc")],
-        [InlineKeyboardButton("📦 ពិនិត្យចំនួនស្តុក", callback_data="check_stock")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = (
-        "👋 **សួស្តី! សូមស្វាគមន៍មកកាន់ហាង Roblox VC**\n\n"
+    caption_text = (
+        "👋 **សួស្តី! សូមស្វាគមន៍មកកាន់ហាង ROBLOX VC STORE**\n\n"
         f"✨ {detail}\n"
-        f"💵 តម្លៃ៖ ${price} / 1 Account\n\n"
-        "សូមជ្រើសរើសជម្រើសខាងក្រោម៖"
+        f"💵 **តម្លៃ:** `${price}` / 1 Account\n"
+        "⚡ **ដំណើរការ:** ស្វ័យប្រវត្តិ ២៤/៧ ទិញភ្លាមបាន Account ភ្លាម!\n\n"
+        "👇 _សូមជ្រើសរើសជម្រើសខាងក្រោម៖_"
     )
-    if update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-    else:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    
+    reply_markup = get_main_keyboard(price)
 
-# គ្រប់គ្រងប៊ូតុងចុច (Callback Query)
+    if update.message:
+        try:
+            await update.message.reply_photo(photo=banner_url, caption=caption_text, reply_markup=reply_markup, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(caption_text, reply_markup=reply_markup, parse_mode="Markdown")
+    else:
+        try:
+            await update.callback_query.message.delete()
+        except Exception:
+            pass
+        try:
+            await update.callback_query.message.reply_photo(photo=banner_url, caption=caption_text, reply_markup=reply_markup, parse_mode="Markdown")
+        except Exception:
+            await update.callback_query.message.reply_text(caption_text, reply_markup=reply_markup, parse_mode="Markdown")
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # ប៊ូតុងឆែកស្តុក
+    back_kb = [[InlineKeyboardButton("🔙 ត្រឡប់ទៅម៉ឺនុយដើម", callback_data="back_home")]]
+
     if query.data == "check_stock":
         conn = sqlite3.connect("shop.db")
         c = conn.cursor()
@@ -120,69 +140,99 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stock = c.fetchone()[0]
         conn.close()
 
-        back_kb = [[InlineKeyboardButton("🔙 ថយក្រោយ", callback_data="back_home")]]
-        await query.edit_message_text(
-            f"📦 **ចំនួនស្តុកបច្ចុប្បន្ន:**\n\n• នៅសល់ **{stock}** គណនី",
-            reply_markup=InlineKeyboardMarkup(back_kb),
-            parse_mode="Markdown"
+        status_icon = "🟢 នៅសល់ស្តុក" if stock > 0 else "🔴 អស់ស្តុក"
+        msg = (
+            "📦 **ព័ត៌មានស្តុកបច្ចុប្បន្ន**\n\n"
+            f"• ស្ថានភាព៖ {status_icon}\n"
+            f"• ចំនួននៅសល់៖ **{stock}** គណនី\n\n"
+            "⚡ ទិញភ្លាម ទទួលបាន Account ប្រើភ្លាមៗ!"
         )
+        if query.message.caption:
+            await query.edit_message_caption(caption=msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
+        else:
+            await query.edit_message_text(text=msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
 
-    # ប៊ូតុងទិញគណនី
+    elif query.data == "faq":
+        faq_text = (
+            "ℹ️ **ការណែនាំ និងលក្ខខណ្ឌប្រើប្រាស់ (FAQ)**\n\n"
+            "1️⃣ **Voice Chat (VC):** គណនីទាំងអស់ត្រូវបានផ្ទៀងផ្ទាត់អាយុ 13+ រួចរាល់ អាចបើក VC ក្នុងហ្គេមបានភ្លាមៗ។\n"
+            "2️⃣ **សុវត្ថិភាព:** គណនីថ្មីស្អាត មិនទាន់ភ្ជាប់ Email ឬលេខទូរស័ព្ទឡើយ។\n"
+            "3️⃣ **បន្ទាប់ពីទិញ:** សូមចូលទៅកាន់ Settings ដើម្បីភ្ជាប់ Email ផ្ទាល់ខ្លួន និងប្តូរ Password ភ្លាមៗ!\n\n"
+            "⚠️ បើមានចម្ងល់បន្ថែម សូមចុចប៊ូតុង **ទាក់ទង Admin** ខាងក្រោម។"
+        )
+        if query.message.caption:
+            await query.edit_message_caption(caption=faq_text, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
+        else:
+            await query.edit_message_text(text=faq_text, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
+
     elif query.data == "buy_vc":
         conn = sqlite3.connect("shop.db")
         c = conn.cursor()
-        # រក Account ដែលនៅទំនេរ
         c.execute("SELECT id, credentials FROM accounts WHERE status = 'available' LIMIT 1")
         acc = c.fetchone()
 
         if not acc:
             conn.close()
-            back_kb = [[InlineKeyboardButton("🔙 ថយក្រោយ", callback_data="back_home")]]
-            await query.edit_message_text("❌ សុំទោស ទំនិញដាច់ស្តុកហើយ!", reply_markup=InlineKeyboardMarkup(back_kb))
+            err_msg = "❌ **សុំទោស ទំនិញដាច់ស្តុកហើយ!**\n\nសូមរង់ចាំ Admin បន្ថែមស្តុកថ្មី ឬទាក់ទងមក Admin។"
+            if query.message.caption:
+                await query.edit_message_caption(caption=err_msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
+            else:
+                await query.edit_message_text(text=err_msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
             return
 
         acc_id, creds = acc
-        # ដកស្តុក auto ដោយប្តូរទៅជា sold
         c.execute("UPDATE accounts SET status = 'sold' WHERE id = ?", (acc_id,))
         conn.commit()
         conn.close()
 
-        back_kb = [[InlineKeyboardButton("🔙 ទិញបន្ថែម", callback_data="back_home")]]
-        msg = (
-            "🎉 **ការទិញបានជោគជ័យ!**\n\n"
+        success_msg = (
+            "🎉 **ការបញ្ជាទិញជោគជ័យ!**\n\n"
             f"🔑 **ព័ត៌មានគណនីរបស់អ្នក:**\n`{creds}`\n\n"
-            "⚠️ _សូមប្រញាប់ចូលប្តូរពាក្យសម្ងាត់ និងដាក់ Email ការពារ!_"
+            "⚠️ _សូមប្រញាប់ចូលប្តូរពាក្យសម្ងាត់ និងភ្ជាប់ Email ការពារភ្លាមៗ!_"
         )
-        await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
+        if query.message.caption:
+            await query.edit_message_caption(caption=success_msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
+        else:
+            await query.edit_message_text(text=success_msg, reply_markup=InlineKeyboardMarkup(back_kb), parse_mode="Markdown")
 
     elif query.data == "back_home":
         await start(update, context)
 
 # ==========================================
-# ៥. មុខងារ ADMIN (USER ធម្មតាមិនអាចប្រើបានដាច់ខាត)
+# ៥. មុខងារ ADMIN
 # ==========================================
-
-# ម៉ឺនុយជំនួយសម្រាប់ Admin (/admin)
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ មិនមានសិទ្ធិប្រើប្រាស់ Command នេះឡើយ!")
         return
 
     admin_text = (
-        "🛠 **ផ្ទាំងគ្រប់គ្រង ADMIN (Admin Control Panel)**\n\n"
-        "បញ្ជា (Commands) ដែលអ្នកអាចប្រើបាន៖\n"
+        "🛠 **ផ្ទាំងគ្រប់គ្រង ADMIN (Admin Panel)**\n\n"
         "• `/add User:xxx | Pass:xxx` ➡️ បញ្ចូលគណនីថ្មីចូលស្តុក\n"
-        "• `/setprice 2.00` ➡️ កែប្រែតម្លៃលក់\n"
-        "• `/setdetail ព័ត៌មានថ្មី...` ➡️ កែប្រែការពិពណ៌នា Detail\n"
-        "• `/stocklist` ➡️ មើលចំនួនស្តុកទាំងលក់រួច និងនៅសល់\n"
-        "• `/clearstock` ➡️ លុបស្តុកចោលទាំងអស់ (Reset មក 0)"
+        "• `/setprice 2.00` ➡️ កែប្រែតម្លៃ\n"
+        "• `/setdetail អត្ថបទ...` ➡️ កែប្រែព័ត៌មាន Detail\n"
+        "• `/setbanner Link_រូបភាព` ➡️ ប្តូររូបភាព Banner លើសារ /start\n"
+        "• `/stocklist` ➡️ ឆែករបាយការណ៍ស្តុក\n"
+        "• `/clearstock` ➡️ លុបស្តុកចោលទាំងអស់"
     )
     await update.message.reply_text(admin_text, parse_mode="Markdown")
 
-# បញ្ចូល Account ចូលស្តុក (/add)
+async def set_banner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ របៀបប្រើ៖ `/setbanner https://example.com/banner.jpg`", parse_mode="Markdown")
+        return
+
+    new_banner = context.args[0]
+    set_setting("banner", new_banner)
+    await update.message.reply_text("✅ បានប្តូររូប Banner ថ្មីជោគជ័យ!")
+
 async def add_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ មិនមានសិទ្ធិប្រើប្រាស់ Command នេះឡើយ!")
+        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
         return
 
     creds = " ".join(context.args)
@@ -198,10 +248,9 @@ async def add_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"✅ បានបញ្ចូល Account ចូលស្តុកជោគជ័យ:\n`{creds}`", parse_mode="Markdown")
 
-# មើលរបាយការណ៍ស្តុកលម្អិតសម្រាប់ Admin (/stocklist)
 async def stock_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ មិនមានសិទ្ធិប្រើប្រាស់ Command នេះឡើយ!")
+        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
         return
 
     conn = sqlite3.connect("shop.db")
@@ -214,16 +263,15 @@ async def stock_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"📊 **របាយការណ៍ស្តុកបច្ចុប្បន្ន:**\n\n"
-        f"• គណនីនៅសល់ក្នុងស្តុក៖ **{available}**\n"
-        f"• គណនីដែលបានលក់ចេញរួច៖ **{sold}**\n"
+        f"• នៅសល់ក្នុងស្តុក៖ **{available}**\n"
+        f"• លក់ចេញរួច៖ **{sold}**\n"
         f"• សរុបទាំងអស់៖ **{available + sold}**",
         parse_mode="Markdown"
     )
 
-# លុបស្តុកទាំងអស់ចោល (/clearstock)
 async def clear_stock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ មិនមានសិទ្ធិប្រើប្រាស់ Command នេះឡើយ!")
+        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
         return
 
     conn = sqlite3.connect("shop.db")
@@ -232,12 +280,11 @@ async def clear_stock_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
-    await update.message.reply_text("🗑️ បានលុប Stock ទាំងអស់ចោលស្អាតហើយ! (ស្តុកបច្ចុប្បន្ន = 0)")
+    await update.message.reply_text("🗑️ បានលុប Stock ទាំងអស់ចោលស្អាតហើយ!")
 
-# កំណត់តម្លៃ (/setprice)
 async def set_price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ មិនមានសិទ្ធិប្រើប្រាស់ Command នេះឡើយ!")
+        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
         return
 
     if not context.args:
@@ -248,10 +295,9 @@ async def set_price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_setting("price", new_price)
     await update.message.reply_text(f"✅ តម្លៃត្រូវបានប្តូរទៅជា៖ **${new_price}**", parse_mode="Markdown")
 
-# កំណត់ Detail (/setdetail)
 async def set_detail_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ មិនមានសិទ្ធិប្រើប្រាស់ Command នេះឡើយ!")
+        await update.message.reply_text("⛔ អ្នកមិនមែនជា Admin ទេ!")
         return
 
     new_detail = " ".join(context.args)
@@ -266,22 +312,21 @@ async def set_detail_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ៦. ចាប់ផ្ដើមដំណើរការ Bot
 # ==========================================
 if __name__ == '__main__':
-    # បើកដំណើរការ Web Server លើ thread ដាច់ដោយឡែក
     threading.Thread(target=run_web, daemon=True).start()
     
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # Handlers សម្រាប់ User
+    # User handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     
-    # Handlers សម្រាប់ Admin
+    # Admin handlers
     app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("setbanner", set_banner_cmd))
     app.add_handler(CommandHandler("add", add_account))
     app.add_handler(CommandHandler("stocklist", stock_list))
     app.add_handler(CommandHandler("clearstock", clear_stock_cmd))
     app.add_handler(CommandHandler("setprice", set_price_cmd))
     app.add_handler(CommandHandler("setdetail", set_detail_cmd))
     
-    print("Bot is successfully running...")
     app.run_polling()
